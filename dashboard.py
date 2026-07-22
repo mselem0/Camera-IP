@@ -206,19 +206,24 @@ def get_free_space():
         return "Unavailable"
 
 def get_recent_logs(lines_count=10):
-    all_logs = []
+    logs_output = []
     for script in SCRIPTS:
         log_file = os.path.join(BASE_DIR, f"{os.path.splitext(script)[0]}.log")
+        logs_output.append(f"=== {script} log ===")
         if os.path.exists(log_file):
             try:
                 with open(log_file, "r") as f:
                     lines = f.readlines()
-                    all_logs.extend(lines[-lines_count:])
-            except Exception:
-                pass
-    if not all_logs:
-        return "No log output available."
-    return "".join(all_logs[-lines_count:])
+                    if lines:
+                        logs_output.extend([l.strip() for l in lines[-lines_count:]])
+                    else:
+                        logs_output.append("(log file empty)")
+            except Exception as e:
+                logs_output.append(f"Error reading log: {e}")
+        else:
+            logs_output.append("(log file does not exist yet)")
+        logs_output.append("")
+    return "\n".join(logs_output)
 
 def get_recordings_list():
     recordings = []

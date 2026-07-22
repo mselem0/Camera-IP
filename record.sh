@@ -47,12 +47,12 @@ echo "[record.sh] Starting RTSP recording loop..."
 
 while true; do
     echo "[record.sh] Launching ffmpeg..."
-    ffmpeg -loglevel warning \
+    ffmpeg -loglevel info \
         -rtsp_transport tcp \
-        -stimeout 5000000 \
+        -stimeout 10000000 \
         -i "$RTSP_URL" \
         -c copy \
-        -movflags +frag_keyframe+empty_moov+default_base_moof \
+        -movflags +faststart \
         -f segment \
         -segment_time "$SEGMENT_DURATION" \
         -segment_format mp4 \
