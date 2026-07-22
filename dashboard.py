@@ -12,6 +12,12 @@ PID_FILE = os.path.join(BASE_DIR, "nvr.pid")
 CONFIG_FILE = os.path.join(BASE_DIR, "config.sh")
 SCRIPTS = ["record.sh", "upload.sh", "cleanup.sh"]
 
+DEFAULT_CONFIG_KEYS = [
+    "CAMERA_IP", "RTSP_USER", "RTSP_PASS", "RTSP_PORT", "RTSP_PATH",
+    "SMB_IP", "SMB_SHARE", "SMB_USER", "SMB_PASS",
+    "LOCAL_TEMP_DIR", "SEGMENT_DURATION", "MAX_STORAGE_GB"
+]
+
 def parse_config():
     config = {}
     if os.path.exists(CONFIG_FILE):
@@ -22,6 +28,33 @@ def parse_config():
                     key, val = line.split("=", 1)
                     config[key.strip()] = val.strip().strip('"').strip("'")
     return config
+
+def save_config_file(config_data):
+    lines = [
+        "#!/bin/bash",
+        "# config.sh - Configuration settings for RTSP Termux recorder & SMB offloader",
+        "",
+        "# RTSP Camera Configuration",
+        f'CAMERA_IP="{config_data.get("CAMERA_IP", "")}"',
+        f'RTSP_USER="{config_data.get("RTSP_USER", "")}"',
+        f'RTSP_PASS="{config_data.get("RTSP_PASS", "")}"',
+        f'RTSP_PORT="{config_data.get("RTSP_PORT", "554")}"',
+        f'RTSP_PATH="{config_data.get("RTSP_PATH", "stream1")}"',
+        "",
+        "# Network SMB Share Configuration",
+        f'SMB_IP="{config_data.get("SMB_IP", "")}"',
+        f'SMB_SHARE="{config_data.get("SMB_SHARE", "")}"',
+        f'SMB_USER="{config_data.get("SMB_USER", "")}"',
+        f'SMB_PASS="{config_data.get("SMB_PASS", "")}"',
+        "",
+        "# Local Storage & Segment Settings",
+        f'LOCAL_TEMP_DIR="{config_data.get("LOCAL_TEMP_DIR", "$HOME/storage/recordings")}"',
+        f'SEGMENT_DURATION={config_data.get("SEGMENT_DURATION", "600")}',
+        f'MAX_STORAGE_GB={config_data.get("MAX_STORAGE_GB", "100")}',
+        ""
+    ]
+    with open(CONFIG_FILE, "w") as f:
+        f.write("\n".join(lines))
 
 def is_process_running(pid):
     try:
@@ -87,7 +120,6 @@ def stop_nvr():
             os.remove(PID_FILE)
         except OSError:
             pass
-    # Also kill any leftover ffmpeg or script processes
     try:
         subprocess.run(["pkill", "-f", "record.sh|upload.sh|cleanup.sh"], stderr=subprocess.DEVNULL)
     except Exception:
@@ -127,8 +159,6 @@ def get_free_space():
         cmd = ["smbclient", f"//{smb_ip}/{smb_share}", smb_pass, "-U", smb_user, "-c", "df"]
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
         if res.returncode == 0:
-            # Look for line with available blocks
-            # e.g., 1024000 blocks of size 1024. 512000 blocks available
             match = re.search(r"(\d+)\s+blocks available", res.stdout, re.IGNORECASE)
             if match:
                 avail_kb = int(match.group(1))
@@ -171,6 +201,25 @@ def api_status():
         "logs": get_recent_logs(10)
     })
 
+@app.route("/api/config", methods=["GET"])
+def api_get_config():
+    return jsonify(parse_config())
+
+@app.route("/api/config", methods=["POST"])
+def api_save_config():
+    data = request.json or {}
+    save_config_file(data)
+    
+    # If running, restart services to apply new configuration
+    pids = get_running_pids()
+    was_running = len(pids) > 0
+    if was_running:
+        stop_nvr()
+        time.sleep(1)
+        start_nvr()
+        
+    return jsonify({"success": True, "message": "Configuration saved successfully!" + (" Services restarted." if was_running else "")})
+
 @app.route("/api/start", methods=["POST"])
 def api_start():
     start_nvr()
@@ -197,58 +246,170 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             --accent-red: #ef4444;
             --accent-blue: #3b82f6;
             --border-color: #334155;
+            --input-bg: #0f172a;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        body { background: var(--bg-color); color: var(--text-color); padding: 20px; max-width: 600px; margin: 0 auto; }
-        h1 { font-size: 1.5rem; margin-bottom: 20px; text-align: center; color: var(--text-color); }
+        body { background: var(--bg-color); color: var(--text-color); padding: 16px; max-width: 600px; margin: 0 auto; }
+        h1 { font-size: 1.4rem; margin-bottom: 16px; text-align: center; color: var(--text-color); }
+        .tabs { display: flex; border-bottom: 1px solid var(--border-color); margin-bottom: 16px; }
+        .tab-btn { flex: 1; padding: 12px; background: none; border: none; color: var(--text-muted); font-size: 1rem; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; }
+        .tab-btn.active { color: var(--accent-blue); border-bottom-color: var(--accent-blue); }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
         .card { background: var(--card-bg); border-radius: 12px; padding: 16px; margin-bottom: 16px; border: 1px solid var(--border-color); }
-        .status-badge { display: inline-block; padding: 6px 12px; border-radius: 20px; font-weight: bold; font-size: 0.9rem; text-transform: uppercase; }
+        .status-badge { display: inline-block; padding: 6px 12px; border-radius: 20px; font-weight: bold; font-size: 0.85rem; text-transform: uppercase; }
         .status-running { background: rgba(34, 197, 94, 0.2); color: var(--accent-green); border: 1px solid var(--accent-green); }
         .status-stopped { background: rgba(239, 68, 68, 0.2); color: var(--accent-red); border: 1px solid var(--accent-red); }
         .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
         .stat-item { background: rgba(0,0,0,0.2); padding: 12px; border-radius: 8px; }
         .stat-label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px; }
-        .stat-value { font-size: 1rem; font-weight: 600; word-break: break-word; }
+        .stat-value { font-size: 0.95rem; font-weight: 600; word-break: break-word; }
         .btn-group { display: flex; gap: 12px; margin-top: 16px; }
-        button { flex: 1; padding: 14px; border: none; border-radius: 8px; font-size: 1rem; font-weight: bold; cursor: pointer; transition: opacity 0.2s; }
-        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        button.action-btn { flex: 1; padding: 14px; border: none; border-radius: 8px; font-size: 1rem; font-weight: bold; cursor: pointer; transition: opacity 0.2s; }
+        button.action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
         .btn-start { background: var(--accent-green); color: white; }
         .btn-stop { background: var(--accent-red); color: white; }
-        pre.logs { background: #090d16; color: #a7f3d0; padding: 12px; border-radius: 8px; font-family: monospace; font-size: 0.8rem; overflow-x: auto; white-space: pre-wrap; max-height: 200px; border: 1px solid var(--border-color); }
+        .btn-save { background: var(--accent-blue); color: white; width: 100%; padding: 14px; border: none; border-radius: 8px; font-size: 1rem; font-weight: bold; cursor: pointer; margin-top: 12px; }
+        pre.logs { background: #090d16; color: #a7f3d0; padding: 12px; border-radius: 8px; font-family: monospace; font-size: 0.75rem; overflow-x: auto; white-space: pre-wrap; max-height: 200px; border: 1px solid var(--border-color); }
+        .form-group { margin-bottom: 12px; }
+        .form-group label { display: block; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 4px; }
+        .form-group input { width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--input-bg); color: var(--text-color); font-size: 0.9rem; }
+        .section-title { font-size: 0.9rem; color: var(--accent-blue); font-weight: 600; margin: 12px 0 8px 0; border-bottom: 1px solid var(--border-color); padding-bottom: 4px; }
+        .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--accent-green); color: white; padding: 10px 20px; border-radius: 20px; font-weight: 600; display: none; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
     </style>
 </head>
 <body>
-    <h1>📷 Termux NVR Dashboard</h1>
+    <h1>📷 Termux NVR Controller</h1>
+
+    <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab('dashboard')">Dashboard</button>
+        <button class="tab-btn" onclick="switchTab('settings')">Settings</button>
+    </div>
     
-    <div class="card">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <span style="font-weight: 600;">Status</span>
-            <span id="statusBadge" class="status-badge status-stopped">STOPPED</span>
+    <!-- DASHBOARD TAB -->
+    <div id="tab-dashboard" class="tab-content active">
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-weight: 600;">System Status</span>
+                <span id="statusBadge" class="status-badge status-stopped">STOPPED</span>
+            </div>
+
+            <div class="grid">
+                <div class="stat-item">
+                    <div class="stat-label">Router SSD Free Space</div>
+                    <div id="freeSpace" class="stat-value">--</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Last Upload</div>
+                    <div id="lastUpload" class="stat-value">--</div>
+                </div>
+            </div>
+
+            <div class="btn-group">
+                <button id="btnStart" class="action-btn btn-start" onclick="control('start')">Start NVR</button>
+                <button id="btnStop" class="action-btn btn-stop" onclick="control('stop')">Stop NVR</button>
+            </div>
         </div>
 
-        <div class="grid">
-            <div class="stat-item">
-                <div class="stat-label">Router SSD Free Space</div>
-                <div id="freeSpace" class="stat-value">--</div>
-            </div>
-            <div class="stat-item">
-                <div class="stat-label">Last Upload</div>
-                <div id="lastUpload" class="stat-value">--</div>
-            </div>
-        </div>
-
-        <div class="btn-group">
-            <button id="btnStart" class="btn-start" onclick="control('start')">Start NVR</button>
-            <button id="btnStop" class="btn-stop" onclick="control('stop')">Stop NVR</button>
+        <div class="card">
+            <div class="stat-label" style="margin-bottom: 8px;">Recent System Logs (Last 10 Lines)</div>
+            <pre id="logOutput" class="logs">Loading logs...</pre>
         </div>
     </div>
 
-    <div class="card">
-        <div class="stat-label" style="margin-bottom: 8px;">Recent System Logs (Last 10 Lines)</div>
-        <pre id="logOutput" class="logs">Loading logs...</pre>
+    <!-- SETTINGS TAB -->
+    <div id="tab-settings" class="tab-content">
+        <form id="configForm" onsubmit="saveConfig(event)">
+            <div class="card">
+                <div class="section-title">📹 RTSP Camera Settings</div>
+                <div class="form-group">
+                    <label>Camera IP Address</label>
+                    <input type="text" id="CAMERA_IP" required placeholder="e.g. 192.168.1.100">
+                </div>
+                <div class="grid" style="grid-template-columns: 1fr 1fr;">
+                    <div class="form-group">
+                        <label>RTSP Username</label>
+                        <input type="text" id="RTSP_USER" required placeholder="admin">
+                    </div>
+                    <div class="form-group">
+                        <label>RTSP Password</label>
+                        <input type="password" id="RTSP_PASS" required>
+                    </div>
+                </div>
+                <div class="grid" style="grid-template-columns: 1fr 1fr;">
+                    <div class="form-group">
+                        <label>RTSP Port</label>
+                        <input type="text" id="RTSP_PORT" required placeholder="554">
+                    </div>
+                    <div class="form-group">
+                        <label>Stream Path</label>
+                        <input type="text" id="RTSP_PATH" required placeholder="stream1">
+                    </div>
+                </div>
+
+                <div class="section-title">📁 Router SMB Share Settings</div>
+                <div class="form-group">
+                    <label>SMB Server / Router IP</label>
+                    <input type="text" id="SMB_IP" required placeholder="192.168.1.1">
+                </div>
+                <div class="form-group">
+                    <label>SMB Share Name</label>
+                    <input type="text" id="SMB_SHARE" required placeholder="Recordings">
+                </div>
+                <div class="grid" style="grid-template-columns: 1fr 1fr;">
+                    <div class="form-group">
+                        <label>SMB Username</label>
+                        <input type="text" id="SMB_USER" required placeholder="smbuser">
+                    </div>
+                    <div class="form-group">
+                        <label>SMB Password</label>
+                        <input type="password" id="SMB_PASS" required>
+                    </div>
+                </div>
+
+                <div class="section-title">⚙️ Recording & Storage Rules</div>
+                <div class="form-group">
+                    <label>Local Temp Directory</label>
+                    <input type="text" id="LOCAL_TEMP_DIR" required placeholder="$HOME/storage/recordings">
+                </div>
+                <div class="grid" style="grid-template-columns: 1fr 1fr;">
+                    <div class="form-group">
+                        <label>Segment Duration (sec)</label>
+                        <input type="number" id="SEGMENT_DURATION" required placeholder="600">
+                    </div>
+                    <div class="form-group">
+                        <label>Max Storage Limit (GB)</label>
+                        <input type="number" id="MAX_STORAGE_GB" required placeholder="100">
+                    </div>
+                </div>
+
+                <button type="submit" class="btn-save">💾 Save Configuration</button>
+            </div>
+        </form>
     </div>
+
+    <div id="toast" class="toast">Configuration Saved!</div>
 
     <script>
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            
+            event.target.classList.add('active');
+            document.getElementById('tab-' + tabName).classList.add('active');
+
+            if (tabName === 'settings') {
+                loadConfig();
+            }
+        }
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.style.display = 'block';
+            setTimeout(() => { toast.style.display = 'none'; }, 3000);
+        }
+
         async function fetchStatus() {
             try {
                 const res = await fetch('/api/status');
@@ -272,6 +433,48 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 document.getElementById('logOutput').textContent = data.logs;
             } catch (err) {
                 console.error('Failed to fetch status:', err);
+            }
+        }
+
+        async function loadConfig() {
+            try {
+                const res = await fetch('/api/config');
+                const config = await res.json();
+                for (const key in config) {
+                    const input = document.getElementById(key);
+                    if (input) {
+                        input.value = config[key];
+                    }
+                }
+            } catch (err) {
+                alert('Failed to load configuration: ' + err);
+            }
+        }
+
+        async function saveConfig(e) {
+            e.preventDefault();
+            const keys = ['CAMERA_IP', 'RTSP_USER', 'RTSP_PASS', 'RTSP_PORT', 'RTSP_PATH',
+                          'SMB_IP', 'SMB_SHARE', 'SMB_USER', 'SMB_PASS',
+                          'LOCAL_TEMP_DIR', 'SEGMENT_DURATION', 'MAX_STORAGE_GB'];
+            const config = {};
+            keys.forEach(k => {
+                const el = document.getElementById(k);
+                if (el) config[k] = el.value;
+            });
+
+            try {
+                const res = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config)
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(data.message);
+                    fetchStatus();
+                }
+            } catch (err) {
+                alert('Failed to save config: ' + err);
             }
         }
 

@@ -1,48 +1,51 @@
 # Termux RTSP NVR & SMB Offloader
 
-A lightweight, automated Network Video Recorder (NVR) solution designed to run directly on Android via Termux. It captures RTSP streams from IP cameras in 10-minute segments, automatically offloads them to a network SMB share (e.g., router-attached SSD), manages FIFO storage limits, and provides a web dashboard + home screen widgets for hands-free control.
+A lightweight, automated Network Video Recorder (NVR) solution designed to run directly on Android via Termux. It captures RTSP streams from IP cameras in 10-minute segments, automatically offloads them to a network SMB share (e.g., router-attached SSD), manages FIFO storage limits, and provides a full-featured web controller + home screen widgets for hands-free setup and operation.
 
 ---
 
 ## 🚀 Features
 
+- **Full UI Management:** Control recording state, view real-time logs, monitor SSD storage, AND manage all camera/SMB configurations directly from the web interface without touching `config.sh` or the terminal.
 - **Continuous RTSP Recording:** Uses `ffmpeg` to segment streams with zero recoding CPU overhead.
 - **Automated SMB Offloading:** Safely transfers completed segments to a local network share via `smbclient`.
 - **FIFO Capacity Management:** Monitors storage space on the SMB share and auto-deletes the oldest recordings when capacity is exceeded.
-- **Web Dashboard:** Mobile-friendly Flask interface on `http://localhost:8080` showing live status, SSD free space, last upload timestamp, and live logs.
+- **Web Dashboard:** Mobile-friendly Flask interface on `http://localhost:8080` showing live status, SSD free space, last upload timestamp, live logs, and a full Settings tab.
 - **Termux:Widget Shortcuts:** Android home screen buttons for **Start**, **Stop**, and **Status Notification**.
 - **Autostart Support:** Boot integration via `Termux:Boot`.
 
 ---
 
-## 🛠️ Setup & Installation
+## 🛠️ Setup & Quickstart
 
-### 1. Prerequisites (in Termux)
+### 1. Initial Prerequisites (Run once in Termux)
 ```bash
 pkg update && pkg upgrade -y
 pkg install ffmpeg samba python termux-api -y
 pip install flask
 ```
 
-### 2. Configure Settings
-Edit `config.sh` to match your RTSP Camera & Router SMB Share details:
+### 2. Launch Controller
+Run the Flask controller server:
 ```bash
-nano config.sh
+python3 dashboard.py
 ```
 
----
-
-## 📱 Web Dashboard (`dashboard.py`)
-
-The dashboard provides a simple control panel at `http://localhost:8080`.
-
-### Accessing the Dashboard
-- Open Chrome or any browser on the Android phone and navigate to:
-  `http://localhost:8080`
+### 3. Configure Everything via Browser UI
+Open Chrome or any mobile browser on the device and navigate to:
+```
+http://localhost:8080
+```
+- Click the **Settings** tab.
+- Enter your RTSP Camera IP, RTSP credentials, Router SMB IP, Share Name, SMB credentials, and storage limits.
+- Click **Save Configuration**. The system will save settings to `config.sh` and automatically restart active NVR background services if running.
 
 > 🔒 **Security Note:** Flask is configured to bind strictly to `127.0.0.1` (localhost). It is **not** exposed to the external local network, preventing unauthorized access from other network devices.
 
-### Auto-start Dashboard on Boot
+---
+
+## 📱 Auto-start Dashboard on Boot
+
 To make the dashboard automatically run in the background whenever Termux boots, add the following to `~/.termux/boot/start-nvr-dashboard.sh`:
 
 ```bash
@@ -81,7 +84,7 @@ chmod +x ~/.shortcuts/*.sh
 1. Long-press on your Android home screen and select **Widgets**.
 2. Find **Termux:Widget** and select either **Termux Short-cut** or the **Termux Widget** folder.
 3. Drag the widget to your home screen.
-4. You will see:
+4. Available shortcuts:
    - `start-recording.sh`: Starts `record.sh`, `upload.sh`, and `cleanup.sh`.
    - `stop-recording.sh`: Safely terminates all NVR processes.
    - `status.sh`: Triggers a native Termux notification showing current state, free space, and last upload time.
