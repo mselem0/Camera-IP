@@ -458,6 +458,41 @@ def api_stream_video(filename):
 
     return Response(generate(), mimetype="video/mp4")
 
+@app.route("/api/video/<filename>", methods=["DELETE"])
+def api_delete_video(filename):
+    filename = os.path.basename(filename)
+    local_dir = resolve_temp_dir()
+    local_path = os.path.join(local_dir, filename)
+
+    deleted = False
+    # 1. Check & delete local file
+    if os.path.exists(local_path):
+        try:
+            os.remove(local_path)
+            deleted = True
+        except OSError:
+            pass
+
+    # 2. Check & delete SMB share file
+    config = parse_config()
+    smb_ip = config.get("SMB_IP", "")
+    smb_share = config.get("SMB_SHARE", "")
+    smb_user = config.get("SMB_USER", "")
+    smb_pass = config.get("SMB_PASS", "")
+
+    if smb_ip and smb_share:
+        try:
+            cmd = ["smbclient", f"//{smb_ip}/{smb_share}", smb_pass, "-U", smb_user, "-c", f"rm \"{filename}\""]
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            if res.returncode == 0:
+                deleted = True
+        except Exception:
+            pass
+
+    if deleted:
+        return jsonify({"success": True, "message": f"Deleted {filename}"})
+    return jsonify({"success": False, "message": "Failed to delete file"}), 400
+
 @app.route("/api/config", methods=["GET"])
 def api_get_config():
     return jsonify(parse_config())
@@ -545,7 +580,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .rec-name { font-weight: 600; margin-bottom: 2px; }
         .rec-meta { color: var(--text-muted); font-size: 0.75rem; }
         .rec-badge { font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; background: #334155; margin-left: 6px; }
-        .btn-play { background: var(--accent-blue); color: white; border: none; padding: 8px 14px; border-radius: 6px; font-size: 0.85rem; font-weight: 600; cursor: pointer; }
+        .btn-play { background: var(--accent-blue); color: white; border: none; padding: 8px 12px; border-radius: 6px; font-size: 0.85rem; font-weight: 600; cursor: pointer; }
+        .btn-delete { background: var(--accent-red); color: white; border: none; padding: 8px 12px; border-radius: 6px; font-size: 0.85rem; font-weight: 600; cursor: pointer; margin-left: 6px; }
         video.player { width: 100%; border-radius: 8px; margin-bottom: 12px; background: #000; }
         
         .cam-scan-card { background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
@@ -845,11 +881,30 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                                 <span class="rec-badge">${f.location}</span>
                             </div>
                         </div>
-                        <button class="btn-play" onclick="playVideo('${f.filename}')">▶ Play</button>
+                        <div>
+                            <button class="btn-play" onclick="playVideo('${f.filename}')">▶ Play</button>
+                            <button class="btn-delete" onclick="deleteVideo('${f.filename}')">🗑️ Delete</button>
+                        </div>
                     </div>
                 `).join('');
             } catch (err) {
                 list.innerHTML = '<div style="text-align: center; color: var(--accent-red); padding: 20px;">Failed to load recordings.</div>';
+            }
+        }
+
+        async function deleteVideo(filename) {
+            if (!confirm('Are you sure you want to delete ' + filename + '?')) return;
+            try {
+                const res = await fetch('/api/video/' + encodeURIComponent(filename), { method: 'DELETE' });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('Deleted ' + filename);
+                    loadRecordings();
+                } else {
+                    alert('Delete failed: ' + data.message);
+                }
+            } catch (err) {
+                alert('Delete failed: ' + err);
             }
         }
 

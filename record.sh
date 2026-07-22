@@ -45,8 +45,10 @@ while true; do
     echo "[record.sh] Launching ffmpeg..."
     ffmpeg -loglevel warning \
         -rtsp_transport tcp \
+        -stimeout 5000000 \
         -i "$RTSP_URL" \
         -c copy \
+        -movflags +faststart \
         -f segment \
         -segment_time "$SEGMENT_DURATION" \
         -segment_format mp4 \
