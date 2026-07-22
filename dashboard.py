@@ -390,6 +390,8 @@ def api_scan_cameras():
     cameras = scan_network_for_cameras(user, password, port, path)
     return jsonify({"cameras": cameras, "subnet": get_local_subnet()})
 
+import urllib.parse
+
 @app.route("/api/snapshot")
 def api_snapshot():
     config = parse_config()
@@ -400,7 +402,9 @@ def api_snapshot():
     path = config.get("RTSP_PATH", "stream1")
 
     if user and password:
-        rtsp_url = f"rtsp://{user}:{password}@{ip}:{port}/{path}"
+        enc_user = urllib.parse.quote(user, safe="")
+        enc_pass = urllib.parse.quote(password, safe="")
+        rtsp_url = f"rtsp://{enc_user}:{enc_pass}@{ip}:{port}/{path}"
     else:
         rtsp_url = f"rtsp://{ip}:{port}/{path}"
     

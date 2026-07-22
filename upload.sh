@@ -31,6 +31,11 @@ while true; do
                 fi
             fi
 
+            # Ignore empty 0-byte files that are still being initialized
+            if [ ! -s "$file" ]; then
+                continue
+            fi
+
             echo "[upload.sh] Offloading $filename to SMB share..."
 
             # Upload using smbclient

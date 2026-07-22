@@ -13,8 +13,28 @@ fi
 
 trap "if command -v termux-wake-unlock >/dev/null 2>&1; then termux-wake-unlock; fi; exit" EXIT INT TERM
 
+# Helper function to URL-encode special characters in credentials (e.g., @, #, $, %, etc.)
+urlencode() {
+    local string="${1}"
+    local strlen=${#string}
+    local encoded=""
+    local pos char
+
+    for (( pos=0; pos<strlen; pos++ )); do
+        char=${string:$pos:1}
+        case "$char" in
+            [a-zA-Z0-9.~_-]) encoded+="$char" ;;
+            *) printf -v hex '%%%02X' "'$char"
+               encoded+="$hex" ;;
+        esac
+    done
+    echo "$encoded"
+}
+
 if [ -n "$RTSP_USER" ] || [ -n "$RTSP_PASS" ]; then
-    RTSP_URL="rtsp://${RTSP_USER}:${RTSP_PASS}@${CAMERA_IP}:${RTSP_PORT}/${RTSP_PATH}"
+    ENC_USER=$(urlencode "$RTSP_USER")
+    ENC_PASS=$(urlencode "$RTSP_PASS")
+    RTSP_URL="rtsp://${ENC_USER}:${ENC_PASS}@${CAMERA_IP}:${RTSP_PORT}/${RTSP_PATH}"
 else
     RTSP_URL="rtsp://${CAMERA_IP}:${RTSP_PORT}/${RTSP_PATH}"
 fi
