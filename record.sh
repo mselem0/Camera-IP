@@ -31,10 +31,13 @@ urlencode() {
     echo "$encoded"
 }
 
-if [ -n "$RTSP_USER" ] || [ -n "$RTSP_PASS" ]; then
+if [ -n "$RTSP_USER" ] && [ -n "$RTSP_PASS" ]; then
     ENC_USER=$(urlencode "$RTSP_USER")
     ENC_PASS=$(urlencode "$RTSP_PASS")
     RTSP_URL="rtsp://${ENC_USER}:${ENC_PASS}@${CAMERA_IP}:${RTSP_PORT}/${RTSP_PATH}"
+elif [ -n "$RTSP_USER" ]; then
+    ENC_USER=$(urlencode "$RTSP_USER")
+    RTSP_URL="rtsp://${ENC_USER}@${CAMERA_IP}:${RTSP_PORT}/${RTSP_PATH}"
 else
     RTSP_URL="rtsp://${CAMERA_IP}:${RTSP_PORT}/${RTSP_PATH}"
 fi
