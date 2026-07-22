@@ -266,7 +266,15 @@ def get_recordings_list():
             pass
 
     recordings.sort(key=lambda x: x["filename"], reverse=True)
-    return recordings
+    return {
+        "recordings": recordings,
+        "debug": {
+            "local_dir": local_dir,
+            "dir_exists": os.path.exists(local_dir),
+            "files_in_dir": os.listdir(local_dir) if os.path.exists(local_dir) else [],
+            "count": len(recordings)
+        }
+    }
 
 # --- CAMERA SCANNING & AUTO-DISCOVERY ---
 
@@ -873,9 +881,21 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const list = document.getElementById('recordingsList');
             try {
                 const res = await fetch('/api/recordings');
-                const files = await res.json();
+                const data = await res.json();
+                const files = data.recordings || [];
+                const debug = data.debug || {};
+
                 if (files.length === 0) {
-                    list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 20px;">No video segments found.</div>';
+                    list.innerHTML = `
+                        <div style="text-align: center; color: var(--text-muted); padding: 16px;">
+                            <div>No video segments found.</div>
+                            <div style="margin-top: 12px; padding: 10px; background: rgba(0,0,0,0.3); border-radius: 6px; font-size: 0.75rem; text-align: left; font-family: monospace;">
+                                <div><b>🔍 Debug Info:</b></div>
+                                <div>Directory: ${debug.local_dir}</div>
+                                <div>Dir Exists: ${debug.dir_exists}</div>
+                                <div>Files found in folder: ${JSON.stringify(debug.files_in_dir)}</div>
+                            </div>
+                        </div>`;
                     return;
                 }
                 list.innerHTML = files.map(f => `
