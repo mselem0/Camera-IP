@@ -228,7 +228,7 @@ def get_recordings_list():
                     recordings.append({
                         "filename": f,
                         "size_mb": round(stat.st_size / (1024 * 1024), 2),
-                        "location": "Local",
+                        "location": "Recording Live" if stat.st_size > 0 else "Initializing",
                         "mtime": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime))
                     })
                 except OSError:

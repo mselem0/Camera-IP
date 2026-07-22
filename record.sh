@@ -48,7 +48,7 @@ while true; do
         -stimeout 5000000 \
         -i "$RTSP_URL" \
         -c copy \
-        -movflags +faststart \
+        -movflags +frag_keyframe+empty_moov+default_base_moof \
         -f segment \
         -segment_time "$SEGMENT_DURATION" \
         -segment_format mp4 \
