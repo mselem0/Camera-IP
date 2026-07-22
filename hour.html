@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>سجل متابعة الحالة - حور</title>
+    <style>
+        :root {
+            --primary-color: #2c3e50;
+            --border-color: #bdc3c7;
+            --bg-light: #f9f9f9;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #333;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #fff;
+        }
+        .container {
+            max-width: 800px;
+            margin: auto;
+            border: 1px solid var(--border-color);
+            padding: 30px;
+            border-radius: 8px;
+        }
+        h1 {
+            text-align: center;
+            color: var(--primary-color);
+            border-bottom: 2px solid var(--primary-color);
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+        .header-info {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            font-weight: bold;
+            font-size: 1.1em;
+            background-color: var(--bg-light);
+            padding: 15px;
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+        }
+        .header-info div {
+            flex: 1;
+        }
+        h2 {
+            color: var(--primary-color);
+            font-size: 1.2em;
+            margin-top: 30px;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 5px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        th, td {
+            border: 1px solid var(--border-color);
+            padding: 10px;
+            text-align: right;
+            vertical-align: top;
+        }
+        th {
+            background-color: var(--bg-light);
+            color: var(--primary-color);
+        }
+        .checkbox-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+        .symptoms-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-top: 15px;
+        }
+        .symptom-card {
+            border: 1px solid var(--border-color);
+            padding: 15px;
+            border-radius: 5px;
+            background-color: var(--bg-light);
+        }
+        .symptom-card h3 {
+            margin-top: 0;
+            font-size: 1em;
+            color: var(--primary-color);
+            border-bottom: 1px dashed var(--border-color);
+            padding-bottom: 8px;
+        }
+        .notes-area {
+            width: 100%;
+            height: 100px;
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+        
+        /* Print Styles */
+        @media print {
+            body {
+                background-color: transparent;
+                padding: 0;
+            }
+            .container {
+                border: none;
+                padding: 0;
+                width: 100%;
+                max-width: 100%;
+            }
+            .symptom-card {
+                background-color: transparent !important;
+                -webkit-print-color-adjust: exact; 
+            }
+            th {
+                background-color: #eaeaea !important;
+                -webkit-print-color-adjust: exact;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>سجل التقييم الطبي لنوبات الحرارة</h1>
+    
+    <div class="header-info">
+        <div>الاسم: حور</div>
+        <div>تاريخ بداية النوبة: &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;/&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;/&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</div>
+        <div>تاريخ نهاية النوبة: &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;/&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;/&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</div>
+    </div>
+
+    <h2>1. السجل اليومي للحرارة والأدوية (أثناء النوبة)</h2>
+    <table>
+        <thead>
+            <tr>
+                <th width="10%">اليوم</th>
+                <th width="30%">أعلى درجة حرارة تم قياسها</th>
+                <th width="30%">خافض الحرارة المستخدم</th>
+                <th width="30%">الاستجابة للخافض</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- تكرار الأيام -->
+            <tr>
+                <td><strong>اليوم 1</strong></td>
+                <td>
+                    <div class="checkbox-group">
+                        <label class="checkbox-item"><input type="checkbox"> 38°C - 38.5°C</label>
+                        <label class="checkbox-item"><input type="checkbox"> 39°C - 39.5°C</label>
+                        <label class="checkbox-item"><input type="checkbox"> 40°C فأكثر</label>
+                    </div>
+                </td>
+                <td>
+                    <div class="checkbox-group">
+                        <label class="checkbox-item"><input type="checkbox"> سيتال (باراسيتامول)</label>
+                        <label class="checkbox-item"><input type="checkbox"> بروفين (إيبوبروفين)</label>
+                        <label class="checkbox-item"><input type="checkbox"> تبادل بينهما</label>
+                    </div>
+                </td>
+                <td>
+                    <div class="checkbox-group">
+                        <label class="checkbox-item"><input type="checkbox"> سريعة (تنخفض بسهولة)</label>
+                        <label class="checkbox-item"><input type="checkbox"> بطيئة (تأخذ وقت طويل)</label>
+                        <label class="checkbox-item"><input type="checkbox"> لا تستجيب (تعاند)</label>
+                    </div>
+                </td>
+            </tr>
+            <tr>
+                <td><strong>اليوم 2</strong></td>
+                <td>
+                    <div class="checkbox-group">
+                        <label class="checkbox-item"><input type="checkbox"> 38°C - 38.5°C</label>
+                        <label class="checkbox-item"><input type="checkbox"> 39°C - 39.5°C</label>
+                        <label class="checkbox-item"><input type="checkbox"> 40°C فأكثر</label>
+                    </div>
+                </td>
+                <td>
+                    <div class="checkbox-group">
+                        <label class="checkbox-item"><input type="checkbox"> سيتال</label>
+                        <label class="checkbox-item"><input type="checkbox"> بروفين</label>
+                        <label class="checkbox-item"><input type="checkbox"> تبادل</label>
+                    </div>
+                </td>
+                <td>
+                    <div class="checkbox-group">
+                        <label class="checkbox-item"><input type="checkbox"> سريعة</label>
+                        <label class="checkbox-item"><input type="checkbox"> بطيئة</label>
+                        <label class="checkbox-item"><input type="checkbox"> لا تستجيب</label>
+                    </div>
+                </td>
+            </tr>
+            <tr>
+                <td><strong>اليوم 3</strong></td>
+                <td>
+                    <div class="checkbox-group">
+                        <label class="checkbox-item"><input type="checkbox"> 38°C - 38.5°C</label>
+                        <label class="checkbox-item"><input type="checkbox"> 39°C - 39.5°C</label>
+                        <label class="checkbox-item"><input type="checkbox"> 40°C فأكثر</label>
+                    </div>
+                </td>
+                <td>
+                    <div class="checkbox-group">
+                        <label class="checkbox-item"><input type="checkbox"> سيتال</label>
+                        <label class="checkbox-item"><input type="checkbox"> بروفين</label>
+                        <label class="checkbox-item"><input type="checkbox"> تبادل</label>
+                    </div>
+                </td>
+                <td>
+                    <div class="checkbox-group">
+                        <label class="checkbox-item"><input type="checkbox"> سريعة</label>
+                        <label class="checkbox-item"><input type="checkbox"> بطيئة</label>
+                        <label class="checkbox-item"><input type="checkbox"> لا تستجيب</label>
+                    </div>
+                </td>
+            </tr>
+            <tr>
+                <td><strong>اليوم 4</strong></td>
+                <td>
+                    <div class="checkbox-group">
+                        <label class="checkbox-item"><input type="checkbox"> 38°C - 38.5°C</label>
+                        <label class="checkbox-item"><input type="checkbox"> 39°C - 39.5°C</label>
+                        <label class="checkbox-item"><input type="checkbox"> 40°C فأكثر</label>
+                    </div>
+                </td>
+                <td>
+                    <div class="checkbox-group">
+                        <label class="checkbox-item"><input type="checkbox"> سيتال</label>
+                        <label class="checkbox-item"><input type="checkbox"> بروفين</label>
+                        <label class="checkbox-item"><input type="checkbox"> تبادل</label>
+                    </div>
+                </td>
+                <td>
+                    <div class="checkbox-group">
+                        <label class="checkbox-item"><input type="checkbox"> سريعة</label>
+                        <label class="checkbox-item"><input type="checkbox"> بطيئة</label>
+                        <label class="checkbox-item"><input type="checkbox"> لا تستجيب</label>
+                    </div>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2>2. الأعراض المصاحبة للنوبة (يرجى تحديد كل ما ينطبق)</h2>
+    <div class="symptoms-grid">
+        
+        <!-- أعراض مارشال -->
+        <div class="symptom-card">
+            <h3>مؤشرات متلازمة مارشال (PFAPA)</h3>
+            <div class="checkbox-group">
+                <label class="checkbox-item"><input type="checkbox"> احتقان واضح في الحلق / اللوزتين</label>
+                <label class="checkbox-item"><input type="checkbox"> قرح (حبوب بيضاء) في الفم أو اللثة</label>
+                <label class="checkbox-item"><input type="checkbox"> تضخم محسوس في غدد الرقبة</label>
+                <label class="checkbox-item"><input type="checkbox"> النوبة منتظمة (تأتي كل 3-5 أسابيع)</label>
+            </div>
+        </div>
+
+        <!-- أعراض FMF -->
+        <div class="symptom-card">
+            <h3>مؤشرات حمى البحر المتوسط (FMF)</h3>
+            <div class="checkbox-group">
+                <label class="checkbox-item"><input type="checkbox"> ألم ومغص شديد ومفاجئ في البطن</label>
+                <label class="checkbox-item"><input type="checkbox"> ألم في المفاصل (ركبة، كاحل، إلخ)</label>
+                <label class="checkbox-item"><input type="checkbox"> ألم في الصدر عند التنفس العيق</label>
+                <label class="checkbox-item"><input type="checkbox"> النوبة غير منتظمة (عشوائية التوقيت)</label>
+            </div>
+        </div>
+
+        <!-- أعراض عامة / عدوى -->
+        <div class="symptom-card">
+            <h3>مؤشرات العدوى العامة / البرد</h3>
+            <div class="checkbox-group">
+                <label class="checkbox-item"><input type="checkbox"> كحة مستمرة أو بلغم</label>
+                <label class="checkbox-item"><input type="checkbox"> رشح / زكام في الأنف</label>
+                <label class="checkbox-item"><input type="checkbox"> إسهال أو ترجيع</label>
+                <label class="checkbox-item"><input type="checkbox"> طفح جلدي في الجسم</label>
+            </div>
+        </div>
+    </div>
+
+    <h2>3. التقييم العام للنشاط والشهية</h2>
+    <div style="display: flex; gap: 40px; margin-top: 10px;">
+        <div class="checkbox-group">
+            <strong>مستوى النشاط أثناء الحرارة:</strong>
+            <label class="checkbox-item"><input type="checkbox"> طبيعي وتلعب</label>
+            <label class="checkbox-item"><input type="checkbox"> خمول بسيط</label>
+            <label class="checkbox-item"><input type="checkbox"> خمول شديد ورفض للحركة</label>
+        </div>
+        <div class="checkbox-group">
+            <strong>الشهية والرضاعة:</strong>
+            <label class="checkbox-item"><input type="checkbox"> طبيعية</label>
+            <label class="checkbox-item"><input type="checkbox"> ضعيفة نوعاً ما</label>
+            <label class="checkbox-item"><input type="checkbox"> رفض تام للأكل والسوائل</label>
+        </div>
+    </div>
+
+    <h2>4. ملاحظات إضافية (متروكة لولي الأمر أو الطبيب)</h2>
+    <div class="notes-area"></div>
+    <div class="notes-area" style="margin-top: 10px; border-style: dashed;"></div>
+
+</div>
+
+</body>
+</html>
