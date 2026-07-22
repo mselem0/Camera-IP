@@ -6,7 +6,8 @@ A lightweight, automated Network Video Recorder (NVR) solution designed to run d
 
 ## 🚀 Features
 
-- **Automatic Camera Discovery:** Scan your local network (`192.168.x.1-254`) with a single click to find active RTSP cameras and select them automatically into your configuration.
+- **Universal Auto-Discovery Scanner:** Scans your local network (`192.168.x.1-254`), testing multiple common RTSP stream paths (`stream1`, `live/ch0`, `h264`, `Streaming/Channels/101`, `cam/realmonitor`, `live`) and standard default credential sets automatically.
+- **Unauthenticated Stream Support:** Works seamlessly with open/anonymous cameras that do not require a username or password.
 - **Live Camera View:** View real-time snapshot preview directly from the RTSP camera on the UI (auto-refreshed every 3 seconds).
 - **Recordings Playback:** Browse and play recorded `.mp4` video segments (both local temp buffer and SMB share offloads) right inside the web browser.
 - **Full UI Management:** Control recording state, view real-time logs, monitor SSD storage, AND manage all camera/SMB configurations directly from the web interface without touching `config.sh` or the terminal.
@@ -42,7 +43,7 @@ http://localhost:8080
 - **Dashboard:** Start/stop recording, check SSD free space, and view live system logs.
 - **Live View:** Preview live camera frames.
 - **Recordings:** Watch saved `.mp4` video segments stored on local storage or the SMB share.
-- **Settings:** Click **Scan Local Network for Cameras** to automatically discover RTSP camera IPs and select them into your configuration.
+- **Settings:** Click **Scan Network & Auto-Detect Streams** to automatically discover RTSP camera IPs, working stream paths, and credentials, then click **Select** to apply them instantly.
 
 > 🔒 **Security Note:** Flask is configured to bind strictly to `127.0.0.1` (localhost). It is **not** exposed to the external local network, preventing unauthorized access from other network devices.
 

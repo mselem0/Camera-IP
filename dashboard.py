@@ -14,6 +14,27 @@ PID_FILE = os.path.join(BASE_DIR, "nvr.pid")
 CONFIG_FILE = os.path.join(BASE_DIR, "config.sh")
 SCRIPTS = ["record.sh", "upload.sh", "cleanup.sh"]
 
+COMMON_RTSP_PATHS = [
+    "stream1",
+    "live/ch0",
+    "h264",
+    "Streaming/Channels/101",
+    "cam/realmonitor?channel=1&subtype=0",
+    "h264Preview_01_main",
+    "live"
+]
+
+COMMON_CREDENTIALS = [
+    ("", ""),
+    ("admin", "admin"),
+    ("admin", "123456"),
+    ("admin", "password123"),
+    ("admin", "12345"),
+    ("admin", "password"),
+    ("root", "pass"),
+    ("admin", "888888")
+]
+
 def parse_config():
     config = {}
     if os.path.exists(CONFIG_FILE):
@@ -235,7 +256,7 @@ def get_recordings_list():
     recordings.sort(key=lambda x: x["filename"], reverse=True)
     return recordings
 
-# --- CAMERA SCANNING FUNCTIONS ---
+# --- CAMERA SCANNING & AUTO-DISCOVERY ---
 
 def get_local_subnet():
     try:
@@ -265,8 +286,12 @@ def check_ip_port(ip, port=554, timeout=0.6):
         pass
     return None
 
-def test_rtsp_stream(ip, user="admin", password="password123", port="554", path="stream1"):
-    rtsp_url = f"rtsp://{user}:{password}@{ip}:{port}/{path}"
+def test_rtsp_stream(ip, user="", password="", port="554", path="stream1"):
+    if user and password:
+        rtsp_url = f"rtsp://{user}:{password}@{ip}:{port}/{path}"
+    else:
+        rtsp_url = f"rtsp://{ip}:{port}/{path}"
+        
     cmd = [
         "ffmpeg", "-loglevel", "quiet",
         "-rtsp_transport", "tcp",
@@ -276,18 +301,45 @@ def test_rtsp_stream(ip, user="admin", password="password123", port="554", path=
         "pipe:1"
     ]
     try:
-        res = subprocess.run(cmd, capture_output=True, timeout=3)
+        res = subprocess.run(cmd, capture_output=True, timeout=2.5)
         if res.returncode == 0 and len(res.stdout) > 0:
             return True
     except Exception:
         pass
     return False
 
-def scan_network_for_cameras(user="admin", password="password123", port="554", path="stream1"):
+def auto_discover_camera_params(ip, preferred_user="", preferred_pass="", port="554"):
+    cred_list = []
+    if preferred_user or preferred_pass:
+        cred_list.append((preferred_user, preferred_pass))
+    for c in COMMON_CREDENTIALS:
+        if c not in cred_list:
+            cred_list.append(c)
+
+    for u, p in cred_list:
+        for path in COMMON_RTSP_PATHS:
+            if test_rtsp_stream(ip, u, p, port, path):
+                return {
+                    "ip": ip,
+                    "port": port,
+                    "user": u,
+                    "pass": p,
+                    "path": path,
+                    "verified": True
+                }
+    return {
+        "ip": ip,
+        "port": port,
+        "user": preferred_user or "admin",
+        "pass": preferred_pass,
+        "path": "stream1",
+        "verified": False
+    }
+
+def scan_network_for_cameras(user="admin", password="", port="554", path="stream1"):
     subnet = get_local_subnet()
     found_ips = []
     
-    # Fast multi-threaded TCP scan for RTSP port (e.g. 554 or 8554)
     with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
         futures = [executor.submit(check_ip_port, f"{subnet}.{i}", port) for i in range(1, 255)]
         for future in concurrent.futures.as_completed(futures):
@@ -296,14 +348,11 @@ def scan_network_for_cameras(user="admin", password="password123", port="554", p
                 found_ips.append(res_ip)
 
     cameras = []
-    for ip in found_ips:
-        rtsp_ok = test_rtsp_stream(ip, user, password, port, path)
-        cameras.append({
-            "ip": ip,
-            "port": port,
-            "rtsp_open": True,
-            "rtsp_verified": rtsp_ok
-        })
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = [executor.submit(auto_discover_camera_params, ip, user, password, port) for ip in found_ips]
+        for future in concurrent.futures.as_completed(futures):
+            cameras.append(future.result())
+
     return cameras
 
 # --- FLASK ROUTES ---
@@ -327,10 +376,10 @@ def api_status():
 @app.route("/api/scan_cameras", methods=["POST"])
 def api_scan_cameras():
     config = parse_config()
-    user = request.json.get("user") if request.json else config.get("RTSP_USER", "admin")
-    password = request.json.get("password") if request.json else config.get("RTSP_PASS", "password123")
-    port = request.json.get("port") if request.json else config.get("RTSP_PORT", "554")
-    path = request.json.get("path") if request.json else config.get("RTSP_PATH", "stream1")
+    user = request.json.get("user", "") if request.json else config.get("RTSP_USER", "")
+    password = request.json.get("password", "") if request.json else config.get("RTSP_PASS", "")
+    port = request.json.get("port", "554") if request.json else config.get("RTSP_PORT", "554")
+    path = request.json.get("path", "stream1") if request.json else config.get("RTSP_PATH", "stream1")
 
     cameras = scan_network_for_cameras(user, password, port, path)
     return jsonify({"cameras": cameras, "subnet": get_local_subnet()})
@@ -338,7 +387,16 @@ def api_scan_cameras():
 @app.route("/api/snapshot")
 def api_snapshot():
     config = parse_config()
-    rtsp_url = f"rtsp://{config.get('RTSP_USER')}:{config.get('RTSP_PASS')}@{config.get('CAMERA_IP')}:{config.get('RTSP_PORT','554')}/{config.get('RTSP_PATH','stream1')}"
+    user = config.get("RTSP_USER", "")
+    password = config.get("RTSP_PASS", "")
+    ip = config.get("CAMERA_IP", "")
+    port = config.get("RTSP_PORT", "554")
+    path = config.get("RTSP_PATH", "stream1")
+
+    if user and password:
+        rtsp_url = f"rtsp://{user}:{password}@{ip}:{port}/{path}"
+    else:
+        rtsp_url = f"rtsp://{ip}:{port}/{path}"
     
     cmd = [
         "ffmpeg", "-loglevel", "quiet",
@@ -481,7 +539,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         video.player { width: 100%; border-radius: 8px; margin-bottom: 12px; background: #000; }
         
         .cam-scan-card { background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
-        .cam-scan-ip { font-weight: bold; font-size: 0.95rem; }
+        .cam-scan-ip { font-weight: bold; font-size: 0.9rem; }
         .cam-scan-status { font-size: 0.75rem; color: var(--accent-green); margin-top: 2px; }
         .btn-select-cam { background: var(--accent-green); color: white; border: none; padding: 6px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; cursor: pointer; }
     </style>
@@ -562,8 +620,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <!-- SETTINGS TAB -->
     <div id="tab-settings" class="tab-content">
         <div class="card">
-            <div class="section-title">🔍 Automatic Network Camera Discovery</div>
-            <button id="btnScan" class="btn-scan" onclick="scanNetworkCameras()">Scan Local Network for Cameras</button>
+            <div class="section-title">🔍 Auto Camera & Stream Discovery</div>
+            <button id="btnScan" class="btn-scan" onclick="scanNetworkCameras()">Scan Network & Auto-Detect Streams</button>
             <div id="scanResults" style="display: none;"></div>
         </div>
 
@@ -576,12 +634,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 </div>
                 <div class="grid" style="grid-template-columns: 1fr 1fr;">
                     <div class="form-group">
-                        <label>RTSP Username</label>
-                        <input type="text" id="RTSP_USER" required placeholder="admin">
+                        <label>RTSP Username (Optional)</label>
+                        <input type="text" id="RTSP_USER" placeholder="Optional / blank">
                     </div>
                     <div class="form-group">
-                        <label>RTSP Password</label>
-                        <input type="password" id="RTSP_PASS" required>
+                        <label>RTSP Password (Optional)</label>
+                        <input type="password" id="RTSP_PASS" placeholder="Optional / blank">
                     </div>
                 </div>
                 <div class="grid" style="grid-template-columns: 1fr 1fr;">
@@ -707,9 +765,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             const btn = document.getElementById('btnScan');
             const resDiv = document.getElementById('scanResults');
             btn.disabled = true;
-            btn.textContent = 'Scanning Subnet (1-254)... Please wait';
+            btn.textContent = 'Scanning Subnet & Testing Paths... Please wait';
             resDiv.style.display = 'block';
-            resDiv.innerHTML = '<div style="font-size:0.8rem; color:var(--text-muted); text-align:center; padding:10px;">Probing RTSP ports across subnet...</div>';
+            resDiv.innerHTML = '<div style="font-size:0.8rem; color:var(--text-muted); text-align:center; padding:10px;">Probing network IPs and camera stream paths...</div>';
 
             try {
                 const res = await fetch('/api/scan_cameras', {
@@ -724,10 +782,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                 });
                 const data = await res.json();
                 btn.disabled = false;
-                btn.textContent = 'Scan Local Network for Cameras';
+                btn.textContent = 'Scan Network & Auto-Detect Streams';
 
                 if (!data.cameras || data.cameras.length === 0) {
-                    resDiv.innerHTML = `<div style="font-size:0.85rem; color:var(--text-muted); text-align:center; padding:10px;">No cameras detected on subnet ${data.subnet}.x (RTSP Port ${document.getElementById('RTSP_PORT').value}).</div>`;
+                    resDiv.innerHTML = `<div style="font-size:0.85rem; color:var(--text-muted); text-align:center; padding:10px;">No RTSP cameras detected on subnet ${data.subnet}.x (Port ${document.getElementById('RTSP_PORT').value}).</div>`;
                     return;
                 }
 
@@ -736,22 +794,27 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                         <div>
                             <div class="cam-scan-ip">📹 ${cam.ip}:${cam.port}</div>
                             <div class="cam-scan-status">
-                                ${cam.rtsp_verified ? '✅ Stream Verified' : '⚠️ Port 554 Open (RTSP Ready)'}
+                                Path: <b>/${cam.path}</b> | User: <b>${cam.user || 'None'}</b><br>
+                                ${cam.verified ? '✅ Stream Auto-Verified' : '⚠️ Port Open (Stream details manual)'}
                             </div>
                         </div>
-                        <button type="button" class="btn-select-cam" onclick="selectCamera('${cam.ip}')">Select</button>
+                        <button type="button" class="btn-select-cam" onclick="selectCameraParams('${cam.ip}', '${cam.user}', '${cam.pass}', '${cam.port}', '${cam.path}')">Select</button>
                     </div>
                 `).join('');
             } catch (err) {
                 btn.disabled = false;
-                btn.textContent = 'Scan Local Network for Cameras';
+                btn.textContent = 'Scan Network & Auto-Detect Streams';
                 resDiv.innerHTML = '<div style="font-size:0.85rem; color:var(--accent-red); text-align:center; padding:10px;">Scan failed. Check local network connection.</div>';
             }
         }
 
-        function selectCamera(ip) {
+        function selectCameraParams(ip, user, pass, port, path) {
             document.getElementById('CAMERA_IP').value = ip;
-            showToast('Selected Camera IP: ' + ip);
+            document.getElementById('RTSP_USER').value = user;
+            document.getElementById('RTSP_PASS').value = pass;
+            document.getElementById('RTSP_PORT').value = port;
+            document.getElementById('RTSP_PATH').value = path;
+            showToast('Applied Camera Settings for ' + ip);
         }
 
         async function loadRecordings() {

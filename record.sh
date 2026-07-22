@@ -13,7 +13,11 @@ fi
 
 trap "if command -v termux-wake-unlock >/dev/null 2>&1; then termux-wake-unlock; fi; exit" EXIT INT TERM
 
-RTSP_URL="rtsp://${RTSP_USER}:${RTSP_PASS}@${CAMERA_IP}:${RTSP_PORT}/${RTSP_PATH}"
+if [ -n "$RTSP_USER" ] || [ -n "$RTSP_PASS" ]; then
+    RTSP_URL="rtsp://${RTSP_USER}:${RTSP_PASS}@${CAMERA_IP}:${RTSP_PORT}/${RTSP_PATH}"
+else
+    RTSP_URL="rtsp://${CAMERA_IP}:${RTSP_PORT}/${RTSP_PATH}"
+fi
 
 echo "[record.sh] Starting RTSP recording loop..."
 
