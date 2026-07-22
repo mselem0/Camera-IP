@@ -4,6 +4,8 @@ import os
 import re
 import signal
 import time
+import socket
+import concurrent.futures
 
 app = Flask(__name__)
 
@@ -190,7 +192,6 @@ def get_recordings_list():
     config = parse_config()
     local_dir = resolve_temp_dir()
     
-    # 1. Local recordings (currently buffering / uploading)
     if os.path.exists(local_dir):
         for f in os.listdir(local_dir):
             if f.startswith("rec_") and f.endswith(".mp4"):
@@ -206,7 +207,6 @@ def get_recordings_list():
                 except OSError:
                     pass
 
-    # 2. SMB recordings
     smb_ip = config.get("SMB_IP", "")
     smb_share = config.get("SMB_SHARE", "")
     smb_user = config.get("SMB_USER", "")
@@ -222,7 +222,6 @@ def get_recordings_list():
                     if match:
                         fname = match.group(1)
                         fsize = int(match.group(2))
-                        # Only add if not already in local list
                         if not any(r["filename"] == fname for r in recordings):
                             recordings.append({
                                 "filename": fname,
@@ -233,9 +232,81 @@ def get_recordings_list():
         except Exception:
             pass
 
-    # Sort descending by filename timestamp
     recordings.sort(key=lambda x: x["filename"], reverse=True)
     return recordings
+
+# --- CAMERA SCANNING FUNCTIONS ---
+
+def get_local_subnet():
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        parts = ip.split(".")
+        return f"{parts[0]}.{parts[1]}.{parts[2]}"
+    except Exception:
+        config = parse_config()
+        cam_ip = config.get("CAMERA_IP", "192.168.1.100")
+        parts = cam_ip.split(".")
+        if len(parts) == 4:
+            return f"{parts[0]}.{parts[1]}.{parts[2]}"
+        return "192.168.1"
+
+def check_ip_port(ip, port=554, timeout=0.6):
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        result = sock.connect_ex((ip, int(port)))
+        sock.close()
+        if result == 0:
+            return ip
+    except Exception:
+        pass
+    return None
+
+def test_rtsp_stream(ip, user="admin", password="password123", port="554", path="stream1"):
+    rtsp_url = f"rtsp://{user}:{password}@{ip}:{port}/{path}"
+    cmd = [
+        "ffmpeg", "-loglevel", "quiet",
+        "-rtsp_transport", "tcp",
+        "-i", rtsp_url,
+        "-vframes", "1",
+        "-f", "image2",
+        "pipe:1"
+    ]
+    try:
+        res = subprocess.run(cmd, capture_output=True, timeout=3)
+        if res.returncode == 0 and len(res.stdout) > 0:
+            return True
+    except Exception:
+        pass
+    return False
+
+def scan_network_for_cameras(user="admin", password="password123", port="554", path="stream1"):
+    subnet = get_local_subnet()
+    found_ips = []
+    
+    # Fast multi-threaded TCP scan for RTSP port (e.g. 554 or 8554)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
+        futures = [executor.submit(check_ip_port, f"{subnet}.{i}", port) for i in range(1, 255)]
+        for future in concurrent.futures.as_completed(futures):
+            res_ip = future.result()
+            if res_ip:
+                found_ips.append(res_ip)
+
+    cameras = []
+    for ip in found_ips:
+        rtsp_ok = test_rtsp_stream(ip, user, password, port, path)
+        cameras.append({
+            "ip": ip,
+            "port": port,
+            "rtsp_open": True,
+            "rtsp_verified": rtsp_ok
+        })
+    return cameras
+
+# --- FLASK ROUTES ---
 
 @app.route("/")
 def index():
@@ -252,6 +323,17 @@ def api_status():
         "last_upload": get_last_upload_time(),
         "logs": get_recent_logs(10)
     })
+
+@app.route("/api/scan_cameras", methods=["POST"])
+def api_scan_cameras():
+    config = parse_config()
+    user = request.json.get("user") if request.json else config.get("RTSP_USER", "admin")
+    password = request.json.get("password") if request.json else config.get("RTSP_PASS", "password123")
+    port = request.json.get("port") if request.json else config.get("RTSP_PORT", "554")
+    path = request.json.get("path") if request.json else config.get("RTSP_PATH", "stream1")
+
+    cameras = scan_network_for_cameras(user, password, port, path)
+    return jsonify({"cameras": cameras, "subnet": get_local_subnet()})
 
 @app.route("/api/snapshot")
 def api_snapshot():
@@ -274,7 +356,6 @@ def api_snapshot():
     except Exception:
         pass
     
-    # Return placeholder transparent SVG pixel / error graphic if ffmpeg fails
     fallback_svg = '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360"><rect width="100%" height="100%" fill="#1e293b"/><text x="50%" y="50%" fill="#94a3b8" dominant-baseline="middle" text-anchor="middle" font-family="sans-serif" font-size="18">Camera Offline or Unreachable</text></svg>'
     return Response(fallback_svg, mimetype="image/svg+xml")
 
@@ -291,7 +372,6 @@ def api_stream_video(filename):
     if os.path.exists(local_path):
         return send_from_directory(local_dir, filename)
 
-    # Stream from SMB
     config = parse_config()
     smb_ip = config.get("SMB_IP", "")
     smb_share = config.get("SMB_SHARE", "")
@@ -378,6 +458,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .btn-start { background: var(--accent-green); color: white; }
         .btn-stop { background: var(--accent-red); color: white; }
         .btn-save { background: var(--accent-blue); color: white; width: 100%; padding: 14px; border: none; border-radius: 8px; font-size: 1rem; font-weight: bold; cursor: pointer; margin-top: 12px; }
+        .btn-scan { background: #8b5cf6; color: white; border: none; padding: 10px 16px; border-radius: 6px; font-weight: 600; font-size: 0.85rem; cursor: pointer; width: 100%; margin-bottom: 12px; }
         pre.logs { background: #090d16; color: #a7f3d0; padding: 12px; border-radius: 8px; font-family: monospace; font-size: 0.75rem; overflow-x: auto; white-space: pre-wrap; max-height: 180px; border: 1px solid var(--border-color); }
         .form-group { margin-bottom: 12px; }
         .form-group label { display: block; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 4px; }
@@ -385,7 +466,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .section-title { font-size: 0.9rem; color: var(--accent-blue); font-weight: 600; margin: 12px 0 8px 0; border-bottom: 1px solid var(--border-color); padding-bottom: 4px; }
         .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--accent-green); color: white; padding: 10px 20px; border-radius: 20px; font-weight: 600; display: none; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
 
-        /* LIVE & RECORDINGS UI */
         .live-container { position: relative; width: 100%; border-radius: 8px; overflow: hidden; background: #000; aspect-ratio: 16/9; display: flex; align-items: center; justify-content: center; }
         .live-container img { width: 100%; height: 100%; object-fit: contain; }
         .live-overlay { position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.6); padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; color: var(--accent-green); display: flex; align-items: center; gap: 6px; }
@@ -399,6 +479,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .rec-badge { font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; background: #334155; margin-left: 6px; }
         .btn-play { background: var(--accent-blue); color: white; border: none; padding: 8px 14px; border-radius: 6px; font-size: 0.85rem; font-weight: 600; cursor: pointer; }
         video.player { width: 100%; border-radius: 8px; margin-bottom: 12px; background: #000; }
+        
+        .cam-scan-card { background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+        .cam-scan-ip { font-weight: bold; font-size: 0.95rem; }
+        .cam-scan-status { font-size: 0.75rem; color: var(--accent-green); margin-top: 2px; }
+        .btn-select-cam { background: var(--accent-green); color: white; border: none; padding: 6px 12px; border-radius: 6px; font-size: 0.8rem; font-weight: 600; cursor: pointer; }
     </style>
 </head>
 <body>
@@ -476,6 +561,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
     <!-- SETTINGS TAB -->
     <div id="tab-settings" class="tab-content">
+        <div class="card">
+            <div class="section-title">🔍 Automatic Network Camera Discovery</div>
+            <button id="btnScan" class="btn-scan" onclick="scanNetworkCameras()">Scan Local Network for Cameras</button>
+            <div id="scanResults" style="display: none;"></div>
+        </div>
+
         <form id="configForm" onsubmit="saveConfig(event)">
             <div class="card">
                 <div class="section-title">📹 RTSP Camera Settings</div>
@@ -610,6 +701,57 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             } catch (err) {
                 console.error('Failed to fetch status:', err);
             }
+        }
+
+        async function scanNetworkCameras() {
+            const btn = document.getElementById('btnScan');
+            const resDiv = document.getElementById('scanResults');
+            btn.disabled = true;
+            btn.textContent = 'Scanning Subnet (1-254)... Please wait';
+            resDiv.style.display = 'block';
+            resDiv.innerHTML = '<div style="font-size:0.8rem; color:var(--text-muted); text-align:center; padding:10px;">Probing RTSP ports across subnet...</div>';
+
+            try {
+                const res = await fetch('/api/scan_cameras', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        user: document.getElementById('RTSP_USER').value,
+                        password: document.getElementById('RTSP_PASS').value,
+                        port: document.getElementById('RTSP_PORT').value,
+                        path: document.getElementById('RTSP_PATH').value
+                    })
+                });
+                const data = await res.json();
+                btn.disabled = false;
+                btn.textContent = 'Scan Local Network for Cameras';
+
+                if (!data.cameras || data.cameras.length === 0) {
+                    resDiv.innerHTML = `<div style="font-size:0.85rem; color:var(--text-muted); text-align:center; padding:10px;">No cameras detected on subnet ${data.subnet}.x (RTSP Port ${document.getElementById('RTSP_PORT').value}).</div>`;
+                    return;
+                }
+
+                resDiv.innerHTML = data.cameras.map(cam => `
+                    <div class="cam-scan-card">
+                        <div>
+                            <div class="cam-scan-ip">📹 ${cam.ip}:${cam.port}</div>
+                            <div class="cam-scan-status">
+                                ${cam.rtsp_verified ? '✅ Stream Verified' : '⚠️ Port 554 Open (RTSP Ready)'}
+                            </div>
+                        </div>
+                        <button type="button" class="btn-select-cam" onclick="selectCamera('${cam.ip}')">Select</button>
+                    </div>
+                `).join('');
+            } catch (err) {
+                btn.disabled = false;
+                btn.textContent = 'Scan Local Network for Cameras';
+                resDiv.innerHTML = '<div style="font-size:0.85rem; color:var(--accent-red); text-align:center; padding:10px;">Scan failed. Check local network connection.</div>';
+            }
+        }
+
+        function selectCamera(ip) {
+            document.getElementById('CAMERA_IP').value = ip;
+            showToast('Selected Camera IP: ' + ip);
         }
 
         async function loadRecordings() {
