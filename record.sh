@@ -4,7 +4,8 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/config.sh"
 
-mkdir -p "$LOCAL_TEMP_DIR"
+EVALUATED_TEMP_DIR=$(eval echo "$LOCAL_TEMP_DIR")
+mkdir -p "$EVALUATED_TEMP_DIR"
 
 # Acquire Termux wake lock to prevent CPU sleep
 if command -v termux-wake-lock >/dev/null 2>&1; then
@@ -57,7 +58,7 @@ while true; do
         -segment_format mp4 \
         -reset_timestamps 1 \
         -strftime 1 \
-        "$LOCAL_TEMP_DIR/rec_%Y%m%d_%H%M%S.mp4"
+        "$EVALUATED_TEMP_DIR/rec_%Y%m%d_%H%M%S.mp4"
 
     echo "[record.sh] ffmpeg exited with status $?. Reconnecting in 5 seconds..."
     sleep 5

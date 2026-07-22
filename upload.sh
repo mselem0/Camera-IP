@@ -4,14 +4,15 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/config.sh"
 
-mkdir -p "$LOCAL_TEMP_DIR"
+EVALUATED_TEMP_DIR=$(eval echo "$LOCAL_TEMP_DIR")
+mkdir -p "$EVALUATED_TEMP_DIR"
 
 echo "[upload.sh] Starting SMB upload loop..."
 
 while true; do
     # Find files in local temp dir matching rec_*.mp4
     shopt -s nullglob
-    files=("$LOCAL_TEMP_DIR"/rec_*.mp4)
+    files=("$EVALUATED_TEMP_DIR"/rec_*.mp4)
     shopt -u nullglob
 
     if [ ${#files[@]} -gt 0 ]; then
