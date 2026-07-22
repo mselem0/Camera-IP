@@ -6,11 +6,13 @@ A lightweight, automated Network Video Recorder (NVR) solution designed to run d
 
 ## 🚀 Features
 
+- **Live Camera View:** View real-time snapshot preview directly from the RTSP camera on the UI (auto-refreshed every 3 seconds).
+- **Recordings Playback:** Browse and play recorded `.mp4` video segments (both local temp buffer and SMB share offloads) right inside the web browser.
 - **Full UI Management:** Control recording state, view real-time logs, monitor SSD storage, AND manage all camera/SMB configurations directly from the web interface without touching `config.sh` or the terminal.
 - **Continuous RTSP Recording:** Uses `ffmpeg` to segment streams with zero recoding CPU overhead.
 - **Automated SMB Offloading:** Safely transfers completed segments to a local network share via `smbclient`.
 - **FIFO Capacity Management:** Monitors storage space on the SMB share and auto-deletes the oldest recordings when capacity is exceeded.
-- **Web Dashboard:** Mobile-friendly Flask interface on `http://localhost:8080` showing live status, SSD free space, last upload timestamp, live logs, and a full Settings tab.
+- **Web Dashboard:** Mobile-friendly Flask interface on `http://localhost:8080` with Dashboard, Live View, Recordings Browser/Player, and Settings tabs.
 - **Termux:Widget Shortcuts:** Android home screen buttons for **Start**, **Stop**, and **Status Notification**.
 - **Autostart Support:** Boot integration via `Termux:Boot`.
 
@@ -31,14 +33,15 @@ Run the Flask controller server:
 python3 dashboard.py
 ```
 
-### 3. Configure Everything via Browser UI
+### 3. Open UI in Mobile Browser
 Open Chrome or any mobile browser on the device and navigate to:
 ```
 http://localhost:8080
 ```
-- Click the **Settings** tab.
-- Enter your RTSP Camera IP, RTSP credentials, Router SMB IP, Share Name, SMB credentials, and storage limits.
-- Click **Save Configuration**. The system will save settings to `config.sh` and automatically restart active NVR background services if running.
+- **Dashboard:** Start/stop recording, check SSD free space, and view live system logs.
+- **Live View:** Preview live camera frames.
+- **Recordings:** Watch saved `.mp4` video segments stored on local storage or the SMB share.
+- **Settings:** Configure RTSP camera & SMB router share credentials without touching files.
 
 > 🔒 **Security Note:** Flask is configured to bind strictly to `127.0.0.1` (localhost). It is **not** exposed to the external local network, preventing unauthorized access from other network devices.
 

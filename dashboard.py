@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, render_template_string, request
+from flask import Flask, jsonify, render_template_string, request, Response, send_from_directory
 import subprocess
 import os
 import re
@@ -11,12 +11,6 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PID_FILE = os.path.join(BASE_DIR, "nvr.pid")
 CONFIG_FILE = os.path.join(BASE_DIR, "config.sh")
 SCRIPTS = ["record.sh", "upload.sh", "cleanup.sh"]
-
-DEFAULT_CONFIG_KEYS = [
-    "CAMERA_IP", "RTSP_USER", "RTSP_PASS", "RTSP_PORT", "RTSP_PATH",
-    "SMB_IP", "SMB_SHARE", "SMB_USER", "SMB_PASS",
-    "LOCAL_TEMP_DIR", "SEGMENT_DURATION", "MAX_STORAGE_GB"
-]
 
 def parse_config():
     config = {}
@@ -55,6 +49,12 @@ def save_config_file(config_data):
     ]
     with open(CONFIG_FILE, "w") as f:
         f.write("\n".join(lines))
+
+def resolve_temp_dir():
+    config = parse_config()
+    raw_path = config.get("LOCAL_TEMP_DIR", "$HOME/storage/recordings")
+    expanded = os.path.expanduser(os.path.expandvars(raw_path))
+    return os.path.abspath(expanded)
 
 def is_process_running(pid):
     try:
@@ -185,6 +185,58 @@ def get_recent_logs(lines_count=10):
         return "No log output available."
     return "".join(all_logs[-lines_count:])
 
+def get_recordings_list():
+    recordings = []
+    config = parse_config()
+    local_dir = resolve_temp_dir()
+    
+    # 1. Local recordings (currently buffering / uploading)
+    if os.path.exists(local_dir):
+        for f in os.listdir(local_dir):
+            if f.startswith("rec_") and f.endswith(".mp4"):
+                fp = os.path.join(local_dir, f)
+                try:
+                    stat = os.stat(fp)
+                    recordings.append({
+                        "filename": f,
+                        "size_mb": round(stat.st_size / (1024 * 1024), 2),
+                        "location": "Local",
+                        "mtime": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime))
+                    })
+                except OSError:
+                    pass
+
+    # 2. SMB recordings
+    smb_ip = config.get("SMB_IP", "")
+    smb_share = config.get("SMB_SHARE", "")
+    smb_user = config.get("SMB_USER", "")
+    smb_pass = config.get("SMB_PASS", "")
+
+    if smb_ip and smb_share:
+        try:
+            cmd = ["smbclient", f"//{smb_ip}/{smb_share}", smb_pass, "-U", smb_user, "-c", "ls rec_*.mp4"]
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            if res.returncode == 0:
+                for line in res.stdout.splitlines():
+                    match = re.search(r"(rec_[0-9_]+\.mp4)\s+[A-Z]*\s+([0-9]+)", line)
+                    if match:
+                        fname = match.group(1)
+                        fsize = int(match.group(2))
+                        # Only add if not already in local list
+                        if not any(r["filename"] == fname for r in recordings):
+                            recordings.append({
+                                "filename": fname,
+                                "size_mb": round(fsize / (1024 * 1024), 2),
+                                "location": "SMB Share",
+                                "mtime": "Stored"
+                            })
+        except Exception:
+            pass
+
+    # Sort descending by filename timestamp
+    recordings.sort(key=lambda x: x["filename"], reverse=True)
+    return recordings
+
 @app.route("/")
 def index():
     return render_template_string(HTML_TEMPLATE)
@@ -201,6 +253,63 @@ def api_status():
         "logs": get_recent_logs(10)
     })
 
+@app.route("/api/snapshot")
+def api_snapshot():
+    config = parse_config()
+    rtsp_url = f"rtsp://{config.get('RTSP_USER')}:{config.get('RTSP_PASS')}@{config.get('CAMERA_IP')}:{config.get('RTSP_PORT','554')}/{config.get('RTSP_PATH','stream1')}"
+    
+    cmd = [
+        "ffmpeg", "-loglevel", "quiet",
+        "-rtsp_transport", "tcp",
+        "-i", rtsp_url,
+        "-vframes", "1",
+        "-f", "image2",
+        "-q:v", "3",
+        "pipe:1"
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, timeout=8)
+        if proc.returncode == 0 and len(proc.stdout) > 0:
+            return Response(proc.stdout, mimetype="image/jpeg")
+    except Exception:
+        pass
+    
+    # Return placeholder transparent SVG pixel / error graphic if ffmpeg fails
+    fallback_svg = '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360"><rect width="100%" height="100%" fill="#1e293b"/><text x="50%" y="50%" fill="#94a3b8" dominant-baseline="middle" text-anchor="middle" font-family="sans-serif" font-size="18">Camera Offline or Unreachable</text></svg>'
+    return Response(fallback_svg, mimetype="image/svg+xml")
+
+@app.route("/api/recordings")
+def api_recordings():
+    return jsonify(get_recordings_list())
+
+@app.route("/api/video/<filename>")
+def api_stream_video(filename):
+    filename = os.path.basename(filename)
+    local_dir = resolve_temp_dir()
+    local_path = os.path.join(local_dir, filename)
+
+    if os.path.exists(local_path):
+        return send_from_directory(local_dir, filename)
+
+    # Stream from SMB
+    config = parse_config()
+    smb_ip = config.get("SMB_IP", "")
+    smb_share = config.get("SMB_SHARE", "")
+    smb_user = config.get("SMB_USER", "")
+    smb_pass = config.get("SMB_PASS", "")
+
+    cmd = ["smbclient", f"//{smb_ip}/{smb_share}", smb_pass, "-U", smb_user, "-c", f"get \"{filename}\" -"]
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    
+    def generate():
+        while True:
+            chunk = proc.stdout.read(64 * 1024)
+            if not chunk:
+                break
+            yield chunk
+
+    return Response(generate(), mimetype="video/mp4")
+
 @app.route("/api/config", methods=["GET"])
 def api_get_config():
     return jsonify(parse_config())
@@ -210,7 +319,6 @@ def api_save_config():
     data = request.json or {}
     save_config_file(data)
     
-    # If running, restart services to apply new configuration
     pids = get_running_pids()
     was_running = len(pids) > 0
     if was_running:
@@ -249,10 +357,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             --input-bg: #0f172a;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        body { background: var(--bg-color); color: var(--text-color); padding: 16px; max-width: 600px; margin: 0 auto; }
+        body { background: var(--bg-color); color: var(--text-color); padding: 16px; max-width: 650px; margin: 0 auto; }
         h1 { font-size: 1.4rem; margin-bottom: 16px; text-align: center; color: var(--text-color); }
         .tabs { display: flex; border-bottom: 1px solid var(--border-color); margin-bottom: 16px; }
-        .tab-btn { flex: 1; padding: 12px; background: none; border: none; color: var(--text-muted); font-size: 1rem; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; }
+        .tab-btn { flex: 1; padding: 12px; background: none; border: none; color: var(--text-muted); font-size: 0.95rem; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; }
         .tab-btn.active { color: var(--accent-blue); border-bottom-color: var(--accent-blue); }
         .tab-content { display: none; }
         .tab-content.active { display: block; }
@@ -270,12 +378,27 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         .btn-start { background: var(--accent-green); color: white; }
         .btn-stop { background: var(--accent-red); color: white; }
         .btn-save { background: var(--accent-blue); color: white; width: 100%; padding: 14px; border: none; border-radius: 8px; font-size: 1rem; font-weight: bold; cursor: pointer; margin-top: 12px; }
-        pre.logs { background: #090d16; color: #a7f3d0; padding: 12px; border-radius: 8px; font-family: monospace; font-size: 0.75rem; overflow-x: auto; white-space: pre-wrap; max-height: 200px; border: 1px solid var(--border-color); }
+        pre.logs { background: #090d16; color: #a7f3d0; padding: 12px; border-radius: 8px; font-family: monospace; font-size: 0.75rem; overflow-x: auto; white-space: pre-wrap; max-height: 180px; border: 1px solid var(--border-color); }
         .form-group { margin-bottom: 12px; }
         .form-group label { display: block; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 4px; }
         .form-group input { width: 100%; padding: 10px; border-radius: 6px; border: 1px solid var(--border-color); background: var(--input-bg); color: var(--text-color); font-size: 0.9rem; }
         .section-title { font-size: 0.9rem; color: var(--accent-blue); font-weight: 600; margin: 12px 0 8px 0; border-bottom: 1px solid var(--border-color); padding-bottom: 4px; }
         .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--accent-green); color: white; padding: 10px 20px; border-radius: 20px; font-weight: 600; display: none; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+
+        /* LIVE & RECORDINGS UI */
+        .live-container { position: relative; width: 100%; border-radius: 8px; overflow: hidden; background: #000; aspect-ratio: 16/9; display: flex; align-items: center; justify-content: center; }
+        .live-container img { width: 100%; height: 100%; object-fit: contain; }
+        .live-overlay { position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.6); padding: 4px 8px; border-radius: 4px; font-size: 0.75rem; color: var(--accent-green); display: flex; align-items: center; gap: 6px; }
+        .live-dot { width: 8px; height: 8px; background: var(--accent-green); border-radius: 50%; animation: blink 1.5s infinite; }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        
+        .rec-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: rgba(0,0,0,0.2); border-radius: 8px; margin-bottom: 8px; border: 1px solid var(--border-color); }
+        .rec-info { font-size: 0.85rem; }
+        .rec-name { font-weight: 600; margin-bottom: 2px; }
+        .rec-meta { color: var(--text-muted); font-size: 0.75rem; }
+        .rec-badge { font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; background: #334155; margin-left: 6px; }
+        .btn-play { background: var(--accent-blue); color: white; border: none; padding: 8px 14px; border-radius: 6px; font-size: 0.85rem; font-weight: 600; cursor: pointer; }
+        video.player { width: 100%; border-radius: 8px; margin-bottom: 12px; background: #000; }
     </style>
 </head>
 <body>
@@ -283,6 +406,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
     <div class="tabs">
         <button class="tab-btn active" onclick="switchTab('dashboard')">Dashboard</button>
+        <button class="tab-btn" onclick="switchTab('live')">Live View</button>
+        <button class="tab-btn" onclick="switchTab('recordings')">Recordings</button>
         <button class="tab-btn" onclick="switchTab('settings')">Settings</button>
     </div>
     
@@ -314,6 +439,38 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div class="card">
             <div class="stat-label" style="margin-bottom: 8px;">Recent System Logs (Last 10 Lines)</div>
             <pre id="logOutput" class="logs">Loading logs...</pre>
+        </div>
+    </div>
+
+    <!-- LIVE VIEW TAB -->
+    <div id="tab-live" class="tab-content">
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <span style="font-weight: 600;">Live Camera Snapshot</span>
+                <span style="font-size: 0.75rem; color: var(--text-muted);">Auto-refreshes 3s</span>
+            </div>
+            <div class="live-container">
+                <div class="live-overlay"><div class="live-dot"></div> LIVE</div>
+                <img id="liveSnapshot" src="/api/snapshot" alt="Live Camera Preview" onclick="refreshSnapshot()">
+            </div>
+        </div>
+    </div>
+
+    <!-- RECORDINGS TAB -->
+    <div id="tab-recordings" class="tab-content">
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <span style="font-weight: 600;">Saved Video Segments</span>
+                <button onclick="loadRecordings()" style="background: none; border: none; color: var(--accent-blue); font-size: 0.85rem; font-weight: 600; cursor: pointer;">🔄 Refresh</button>
+            </div>
+
+            <div id="videoPlayerContainer" style="display: none;">
+                <video id="videoPlayer" class="player" controls autoplay></video>
+            </div>
+
+            <div id="recordingsList">
+                <div style="text-align: center; color: var(--text-muted); padding: 20px;">Loading recordings...</div>
+            </div>
         </div>
     </div>
 
@@ -391,6 +548,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <div id="toast" class="toast">Configuration Saved!</div>
 
     <script>
+        let snapshotInterval = null;
+
         function switchTab(tabName) {
             document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
@@ -398,8 +557,25 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             event.target.classList.add('active');
             document.getElementById('tab-' + tabName).classList.add('active');
 
-            if (tabName === 'settings') {
+            if (snapshotInterval) {
+                clearInterval(snapshotInterval);
+                snapshotInterval = null;
+            }
+
+            if (tabName === 'live') {
+                refreshSnapshot();
+                snapshotInterval = setInterval(refreshSnapshot, 3000);
+            } else if (tabName === 'recordings') {
+                loadRecordings();
+            } else if (tabName === 'settings') {
                 loadConfig();
+            }
+        }
+
+        function refreshSnapshot() {
+            const img = document.getElementById('liveSnapshot');
+            if (img) {
+                img.src = '/api/snapshot?t=' + new Date().getTime();
             }
         }
 
@@ -434,6 +610,40 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             } catch (err) {
                 console.error('Failed to fetch status:', err);
             }
+        }
+
+        async function loadRecordings() {
+            const list = document.getElementById('recordingsList');
+            try {
+                const res = await fetch('/api/recordings');
+                const files = await res.json();
+                if (files.length === 0) {
+                    list.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 20px;">No video segments found.</div>';
+                    return;
+                }
+                list.innerHTML = files.map(f => `
+                    <div class="rec-item">
+                        <div class="rec-info">
+                            <div class="rec-name">${f.filename}</div>
+                            <div class="rec-meta">
+                                ${f.size_mb} MB
+                                <span class="rec-badge">${f.location}</span>
+                            </div>
+                        </div>
+                        <button class="btn-play" onclick="playVideo('${f.filename}')">▶ Play</button>
+                    </div>
+                `).join('');
+            } catch (err) {
+                list.innerHTML = '<div style="text-align: center; color: var(--accent-red); padding: 20px;">Failed to load recordings.</div>';
+            }
+        }
+
+        function playVideo(filename) {
+            const playerContainer = document.getElementById('videoPlayerContainer');
+            const player = document.getElementById('videoPlayer');
+            playerContainer.style.display = 'block';
+            player.src = '/api/video/' + encodeURIComponent(filename);
+            playerContainer.scrollIntoView({ behavior: 'smooth' });
         }
 
         async function loadConfig() {
