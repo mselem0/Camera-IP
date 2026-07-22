@@ -83,7 +83,13 @@ def resolve_temp_dir():
     config = parse_config()
     raw_path = config.get("LOCAL_TEMP_DIR", "$HOME/storage/recordings")
     expanded = os.path.expanduser(os.path.expandvars(raw_path))
-    return os.path.abspath(expanded)
+    abs_path = os.path.abspath(expanded)
+    if not os.path.exists(abs_path):
+        try:
+            os.makedirs(abs_path, exist_ok=True)
+        except Exception:
+            pass
+    return abs_path
 
 def is_process_running(pid):
     try:
@@ -221,7 +227,7 @@ def get_recordings_list():
     
     if os.path.exists(local_dir):
         for f in os.listdir(local_dir):
-            if f.startswith("rec_") and f.endswith(".mp4"):
+            if f.lower().endswith(".mp4"):
                 fp = os.path.join(local_dir, f)
                 try:
                     stat = os.stat(fp)
