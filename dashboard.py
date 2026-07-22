@@ -14,6 +14,12 @@ PID_FILE = os.path.join(BASE_DIR, "nvr.pid")
 CONFIG_FILE = os.path.join(BASE_DIR, "config.sh")
 SCRIPTS = ["record.sh", "upload.sh", "cleanup.sh"]
 
+# Acquire CPU Wake Lock on Python dashboard startup
+try:
+    subprocess.run(["termux-wake-lock"], stderr=subprocess.DEVNULL)
+except Exception:
+    pass
+
 COMMON_RTSP_PATHS = [
     "stream1",
     "live/ch0",

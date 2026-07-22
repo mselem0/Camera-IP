@@ -4,6 +4,30 @@ A lightweight, automated Network Video Recorder (NVR) solution designed to run d
 
 ---
 
+## 🔋 Android Battery Optimization & Lock Screen Keep-Alive
+
+Android aggressively kills background processes and puts CPU/Wi-Fi to sleep when the screen locks or when **Battery Saver Mode** is on. 
+
+To ensure Python (`dashboard.py`), `ffmpeg`, and `smbclient` **never stop running** even when screen is locked or battery saver is active, follow these 3 steps:
+
+### 1. Enable Termux Wake Lock (Built-in)
+The app scripts (`dashboard.py`, `start.sh`, `record.sh`) automatically invoke `termux-wake-lock` on startup. 
+To manually trigger it at any time:
+```bash
+termux-wake-lock
+```
+
+### 2. Disable Android Battery Optimization for Termux
+1. Open Android **Settings** -> **Apps** -> **Termux**.
+2. Tap **Battery** (or **App battery usage**).
+3. Set background usage to **Unrestricted** (or **Don't optimize**).
+
+### 3. Exclude Termux from System Battery Savers
+- **Samsung / Xiaomi / Huawei / OPPO:** Go to battery settings or background app management and allow Termux to run in background automatically without power management killing it.
+- **Persistent Notification:** Keep the Termux foreground service notification visible in the status bar (Termux does this automatically when wake lock is held).
+
+---
+
 ## 🚀 Features
 
 - **Universal Auto-Discovery Scanner:** Scans your local network (`192.168.x.1-254`), testing multiple common RTSP stream paths (`stream1`, `live/ch0`, `h264`, `Streaming/Channels/101`, `cam/realmonitor`, `live`) and standard default credential sets automatically.

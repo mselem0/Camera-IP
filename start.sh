@@ -7,6 +7,11 @@ source "$SCRIPT_DIR/config.sh"
 # Make scripts executable
 chmod +x "$SCRIPT_DIR/record.sh" "$SCRIPT_DIR/upload.sh" "$SCRIPT_DIR/cleanup.sh"
 
+# Acquire Termux Wake Lock to prevent CPU sleep when screen locks
+if command -v termux-wake-lock >/dev/null 2>&1; then
+    termux-wake-lock
+fi
+
 # Helper function to start a process with nohup if not already running
 start_process() {
     local script_name="$1"
